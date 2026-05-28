@@ -1,12 +1,13 @@
 import os
 import secrets
-import sqlite3
 from datetime import datetime, timedelta
 from functools import wraps
 
 import requests
+import psycopg2
 from dotenv import load_dotenv
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
+from psycopg2.extras import RealDictCursor
 
 
 load_dotenv()
@@ -14,7 +15,16 @@ load_dotenv()
 MIN_PURCHASE_AMOUNT = 2500.0
 DISCOUNT_PERCENT = 15
 EXPIRY_DAYS = 20
-DATABASE_PATH = os.environ.get("PROMO_DB_PATH", "promo_codes.db")
+def normalize_database_url(raw_value: str) -> str:
+    value = raw_value.strip()
+    if value.startswith("psql "):
+        value = value[len("psql ") :].strip()
+    if (value.startswith("'") and value.endswith("'")) or (value.startswith('"') and value.endswith('"')):
+        value = value[1:-1].strip()
+    return value
+
+
+DATABASE_URL = normalize_database_url(os.environ.get("DATABASE_URL", ""))
 REMINDER_DAYS_BEFORE_EXPIRY = int(os.environ.get("PROMO_REMINDER_DAYS_BEFORE_EXPIRY", "3"))
 
 
@@ -22,10 +32,46 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("PROMO_APP_SECRET", "change-me-in-production")
 
 
-def get_db() -> sqlite3.Connection:
+class QueryResult:
+    def __init__(self, rows: list[dict]):
+        self._rows = rows
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return self._rows
+
+
+class PostgresDB:
+    def __init__(self, dsn: str):
+        self._conn = psycopg2.connect(dsn, cursor_factory=RealDictCursor)
+        self._conn.autocommit = False
+
+    @staticmethod
+    def _to_postgres_query(query: str) -> str:
+        # Keep existing sqlite-style placeholders and map them to PostgreSQL.
+        return query.replace("?", "%s")
+
+    def execute(self, query: str, params=()):
+        with self._conn.cursor() as cursor:
+            cursor.execute(self._to_postgres_query(query), params)
+            if cursor.description:
+                return QueryResult(cursor.fetchall())
+            return QueryResult([])
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
+
+
+def get_db() -> PostgresDB:
     if "db" not in g:
-        g.db = sqlite3.connect(DATABASE_PATH)
-        g.db.row_factory = sqlite3.Row
+        if not DATABASE_URL:
+            raise RuntimeError("DATABASE_URL is not set. Configure a PostgreSQL connection string.")
+        g.db = PostgresDB(DATABASE_URL)
     return g.db
 
 
@@ -41,7 +87,7 @@ def init_db():
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS promo_codes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             code TEXT NOT NULL UNIQUE,
             phone_number TEXT,
             customer_ref TEXT,
@@ -56,14 +102,23 @@ def init_db():
         );
         """
     )
-    # Lightweight migration for older DBs created before phone_number support.
-    columns = {row["name"] for row in db.execute("PRAGMA table_info(promo_codes)").fetchall()}
+    # Lightweight migration for schemas created before phone_number support.
+    columns = {
+        row["column_name"]
+        for row in db.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'promo_codes'
+            """
+        ).fetchall()
+    }
     if "phone_number" not in columns:
         db.execute("ALTER TABLE promo_codes ADD COLUMN phone_number TEXT")
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             action TEXT NOT NULL,
             promo_code TEXT,
             actor TEXT NOT NULL,
@@ -75,7 +130,7 @@ def init_db():
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS first_order_phone_verifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             phone_number TEXT NOT NULL UNIQUE,
             verified_at TEXT NOT NULL,
             verified_by TEXT NOT NULL,
@@ -88,7 +143,7 @@ def init_db():
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS promo_reminders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             promo_code TEXT NOT NULL,
             phone_number TEXT NOT NULL,
             remind_on TEXT NOT NULL,
@@ -100,7 +155,14 @@ def init_db():
         """
     )
     first_order_columns = {
-        row["name"] for row in db.execute("PRAGMA table_info(first_order_phone_verifications)").fetchall()
+        row["column_name"]
+        for row in db.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'first_order_phone_verifications'
+            """
+        ).fetchall()
     }
     if "status" not in first_order_columns:
         db.execute(
