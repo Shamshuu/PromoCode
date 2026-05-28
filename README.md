@@ -21,6 +21,7 @@ Simple standalone web app to manually generate and verify one-time promo codes.
 2. Install dependencies:
    - `pip install -r requirements.txt`
 3. Create a real `.env` file by copying `.env.example`, then update values in `.env`.
+   - Set `DATABASE_URL` to your PostgreSQL connection string.
 4. Run:
    - `python app.py`
 5. Open:
@@ -52,3 +53,19 @@ Set `PROMO_ADMIN_USER` and `PROMO_ADMIN_PASSWORD` to secure values before hostin
 ## Hosting
 
 For simple hosting, you can deploy this app on services like Render, Railway, or any VPS that supports Python.
+
+### Render + free external PostgreSQL
+
+1. Create a free PostgreSQL database on Neon or Supabase.
+2. Copy the connection string and set it in Render as `DATABASE_URL`.
+3. Create a Render Web Service from this repo.
+4. Build command:
+   - `pip install -r requirements.txt`
+5. Start command:
+   - `gunicorn app:app`
+6. Add environment variables in Render:
+   - `PROMO_APP_SECRET`
+   - `PROMO_ADMIN_USER`
+   - `PROMO_ADMIN_PASSWORD`
+   - `DATABASE_URL`
+   - Optional Twilio variables if using messaging
