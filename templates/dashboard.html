@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Promo Code Dashboard</title>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; background: #000000; color: #f5f7fa; }
+        .wrap { max-width: 1100px; margin: 20px auto; padding: 0 16px 30px; }
+        .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .card { background: #141414; border: 0; border-radius: 12px; box-shadow: 0 10px 22px rgba(0,0,0,.6); padding: 16px; margin-bottom: 16px; }
+        h1, h2 { margin: 0 0 12px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        label { display: block; margin: 10px 0 4px; font-weight: 600; }
+        input { width: 100%; box-sizing: border-box; padding: 9px; border: 0; border-radius: 8px; background: #222222; color: #f5f7fa; }
+        button { margin-top: 12px; background: #ffffff; color: #000000; border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; font-weight: 700; }
+        .logout-btn { background: #d9d9d9; color: #000000; border: 0; margin-top: 0; }
+        .mark-btn { background: #bfbfbf; color: #000000; border: 0; margin-left: 8px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; border-bottom: 1px solid #2a2a2a; padding: 8px 6px; font-size: 14px; }
+        th { background: #1d1d1d; color: #ffffff; }
+        .hint { color: #d9d9d9; font-size: 14px; }
+        .flash { padding: 10px; border-radius: 6px; margin-bottom: 8px; }
+        .success { background: #1f1f1f; color: #ffffff; border: 0; }
+        .error { background: #383838; color: #ffffff; border: 0; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="top">
+            <div>
+                <h1>Promo Code Dashboard</h1>
+                <div class="hint">Logged in as {{ current_user }}</div>
+            </div>
+            <form method="post" action="/logout">
+                <button class="logout-btn" type="submit">Logout</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Rules</h2>
+            <div class="hint">
+                Minimum purchase: {{ "%.2f"|format(min_purchase) }} |
+                Discount: {{ discount_percent }}% |
+                Expiry: {{ expiry_days }} days from purchase date |
+                One-time use only
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Search By Code / Phone</h2>
+            <form method="get" action="/">
+                <label for="q">Search text</label>
+                <input id="q" name="q" type="text" placeholder="Enter promo code or phone number" value="{{ search_query }}">
+                <button type="submit">Search</button>
+            </form>
+            {% if search_query %}
+                <div class="hint">Showing results for: {{ search_query }}</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Promo Code</th>
+                            <th>Status</th>
+                            <th>Discount %</th>
+                            <th>Purchase Date</th>
+                            <th>Expiry</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in promo_search_results %}
+                        <tr>
+                            <td>{{ row["code"] }}</td>
+                            <td>{{ row["status"] }}</td>
+                            <td>{{ row["discount_percent"] }}</td>
+                            <td>{{ row["purchase_date"] }}</td>
+                            <td>{{ row["expires_at"] }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Phone</th>
+                            <th>First-Order Status</th>
+                            <th>Verified At</th>
+                            <th>Used At</th>
+                            <th>Used By</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in phone_search_results %}
+                        <tr>
+                            <td>{{ row["phone_number"] }}</td>
+                            <td>{{ row["status"] }}</td>
+                            <td>{{ row["verified_at"] }}</td>
+                            <td>{{ row["used_at"] or "-" }}</td>
+                            <td>{{ row["used_by"] or "-" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="card">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="grid">
+            <div class="card">
+                <h2>Generate Promo Code</h2>
+                <form method="post" action="/generate">
+                    <label for="notification_phone">Customer Phone (for auto send + reminders)</label>
+                    <input id="notification_phone" name="notification_phone" type="text" inputmode="numeric" pattern="[0-9]{10,}" placeholder="Optional">
+
+                    <label for="customer_ref">Customer Reference (optional)</label>
+                    <input id="customer_ref" name="customer_ref" type="text" placeholder="Any customer identifier">
+
+                    <label for="purchase_amount">Purchase Amount</label>
+                    <input id="purchase_amount" name="purchase_amount" type="number" step="0.01" required>
+
+                    <label for="purchase_date">Purchase Date</label>
+                    <input id="purchase_date" name="purchase_date" type="date" required>
+
+                    <button type="submit">Generate</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Verify Promo Code</h2>
+                <form method="post">
+                    <label for="promo_code">Promo Code</label>
+                    <input id="promo_code" name="promo_code" type="text" placeholder="PROMO-XXXXXXXX" required>
+                    <button type="submit" formaction="/verify">Verify</button>
+                    <button class="mark-btn" type="submit" formaction="/mark-used">Mark Used</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>First-Order Phone Verification Module</h2>
+            <div class="hint">This module is separate from promo code generation and verification.</div>
+            <form method="post">
+                <label for="first_order_phone_number">Phone Number</label>
+                <input id="first_order_phone_number" name="phone_number" type="text" inputmode="numeric" pattern="[0-9]{10,}" required>
+                <button type="submit" formaction="/first-order/verify-phone">Verify First-Order Phone</button>
+                <button class="mark-btn" type="submit" formaction="/first-order/mark-used">Mark Phone Used</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Recent Promo Codes</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Status</th>
+                        <th>Purchase Amt</th>
+                        <th>Purchase Date</th>
+                        <th>Expiry</th>
+                        <th>Discount %</th>
+                        <th>Used At</th>
+                        <th>Verified By</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in promo_codes %}
+                    <tr>
+                        <td>{{ row["code"] }}</td>
+                        <td>{{ row["status"] }}</td>
+                        <td>{{ "%.2f"|format(row["purchase_amount"]) }}</td>
+                        <td>{{ row["purchase_date"] }}</td>
+                        <td>{{ row["expires_at"] }}</td>
+                        <td>{{ row["discount_percent"] }}</td>
+                        <td>{{ row["used_at"] or "-" }}</td>
+                        <td>{{ row["verified_by"] or "-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>First-Order Phone Verification History</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Phone</th>
+                        <th>Status</th>
+                        <th>Verified At</th>
+                        <th>Verified By</th>
+                        <th>Used At</th>
+                        <th>Used By</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in first_order_verifications %}
+                    <tr>
+                        <td>{{ row["phone_number"] }}</td>
+                        <td>{{ row["status"] }}</td>
+                        <td>{{ row["verified_at"] }}</td>
+                        <td>{{ row["verified_by"] }}</td>
+                        <td>{{ row["used_at"] or "-" }}</td>
+                        <td>{{ row["used_by"] or "-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Reminder Messages</h2>
+            <form method="post" action="/reminders/send-due">
+                <button type="submit">Send Due Reminders</button>
+            </form>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Promo Code</th>
+                        <th>Phone</th>
+                        <th>Remind On</th>
+                        <th>Status</th>
+                        <th>Sent At</th>
+                        <th>Last Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in reminders %}
+                    <tr>
+                        <td>{{ row["promo_code"] }}</td>
+                        <td>{{ row["phone_number"] }}</td>
+                        <td>{{ row["remind_on"] }}</td>
+                        <td>{{ row["status"] }}</td>
+                        <td>{{ row["sent_at"] or "-" }}</td>
+                        <td>{{ row["last_error"] or "-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Recent Audit Logs</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Actor</th>
+                        <th>Action</th>
+                        <th>Promo Code</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in logs %}
+                    <tr>
+                        <td>{{ row["created_at"] }}</td>
+                        <td>{{ row["actor"] }}</td>
+                        <td>{{ row["action"] }}</td>
+                        <td>{{ row["promo_code"] or "-" }}</td>
+                        <td>{{ row["details"] or "-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
